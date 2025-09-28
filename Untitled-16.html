@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>Deteksi Gesture Tangan</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection" crossorigin="anonymous"></script>
+  <style>
+    body { text-align: center; background: #111; color: white; margin:0; overflow:hidden; }
+    canvas { position: absolute; left: 50%; transform: translateX(-50%); top:0; }
+    #output { margin-top: 480px; font-size: 28px; font-weight: bold; }
+    #startBtn { margin-top:20px; padding:10px 20px; font-size:18px; }
+  </style>
+</head>
+<body>
+  <h2>Vall Sign</h2>
+  <button id="startBtn">Izinkan Kamera</button>
+  <video id="video" autoplay playsinline style="display:none;"></video>
+  <canvas id="canvas"></canvas>
+  <div id="output">Deteksi...</div>
+
+  <script>
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const output = document.getElementById("output");
+    const startBtn = document.getElementById("startBtn");
+
+    // mapping gesture
+    const gestureMap = {
+      1: "aku",
+      2: "suka",
+      3: "steven",
+      4: "valian",
+      5: "hai ganteng"
+    };
+
+    let lastGesture = "";
+    let lastSpokenTime = 0;
+
+    // aktifkan kamera dengan izin
+    async function setupCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => resolve(video);
+        });
+      } catch (err) {
+        alert("Izin kamera ditolak atau tidak tersedia.");
+        console.error(err);
+      }
+    }
+
+    // hitung jari terbuka
+    function countFingers(landmarks) {
+      let fingers = 0;
+      if (landmarks[4].x < landmarks[3].x) fingers++; // jempol
+      for (let tip of [8, 12, 16, 20]) {
+        if (landmarks[tip].y < landmarks[tip - 2].y) fingers++;
+      }
+      return fingers;
+    }
+
+    // bicara sinkron
+    function speak(text) {
+      const now = Date.now();
+      if (lastGesture !== text || now - lastSpokenTime > 2000) {
+        speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "id-ID";
+        speechSynthesis.speak(utterance);
+        lastGesture = text;
+        lastSpokenTime = now;
+      }
+    }
+
+    function drawHand(landmarks) {
+      ctx.fillStyle = "lime";
+      for (let p of landmarks) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      const connections = [
+        [0,1],[1,2],[2,3],[3,4],
+        [0,5],[5,6],[6,7],[7,8],
+        [5,9],[9,10],[10,11],[11,12],
+        [9,13],[13,14],[14,15],[15,16],
+        [13,17],[17,18],[18,19],[19,20],
+        [0,17]
+      ];
+      ctx.strokeStyle = "cyan";
+      ctx.lineWidth = 2;
+      for (let [a, b] of connections) {
+        ctx.beginPath();
+        ctx.moveTo(landmarks[a].x, landmarks[a].y);
+        ctx.lineTo(landmarks[b].x, landmarks[b].y);
+        ctx.stroke();
+      }
+    }
+
+    async function main() {
+      const detector = await handPoseDetection.createDetector(
+        handPoseDetection.SupportedModels.MediaPipeHands,
+        {
+          runtime: "mediapipe",
+          solutionPath: "https://cdn.jsdelivr.net/npm/@mediapipe/hands"
+        }
+      );
+
+      await setupCamera();
+      video.play();
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      async function render() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const hands = await detector.estimateHands(video);
+
+        if (hands.length > 0) {
+          const landmarks = hands[0].keypoints;
+          drawHand(landmarks);
+
+          const fingerCount = countFingers(landmarks);
+          if (gestureMap[fingerCount]) {
+            const text = gestureMap[fingerCount];
+            output.textContent = text;
+            speak(text);
+          } else {
+            output.textContent = "Gesture tidak dikenal";
+          }
+        } else {
+          output.textContent = "Tangan tidak terdeteksi";
+        }
+
+        requestAnimationFrame(render);
+      }
+      render();
+    }
+
+    startBtn.addEventListener("click", () => {
+      startBtn.style.display = "none";
+      main();
+    });
+  </script>
+</body>
+</html>
